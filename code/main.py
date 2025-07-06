@@ -111,7 +111,7 @@ async def wait_for_qr_login( update: Update, user_id: int, client: TelegramClien
             await update.message.reply_text( "✅ Авторизация прошла успешно!" )
             asyncio.create_task( start_telethon_client( user_id, session_string ))
         else:
-            await update.message.reply_text( "❌ Вход не выполнен. Попробуйте снова." )
+            await update.message.reply_text( "❌ Авторизация не выполнен. Попробуйте снова." )
 
     except Exception as e:
         logger.error( f"Error authorization using QR: { e }" )
@@ -137,16 +137,18 @@ async def handle_button( update: Update, context: ContextTypes.DEFAULT_TYPE ) ->
 async def handle_add_channel( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> None:
     user_id = update.effective_user.id
     if user_id not in user_sessions:
-        await update.message.reply_text( "❌ Сначала авторизуйтесь через '🔐 Авторизация'" )
+        await update.message.reply_text( "❌ Сначала авторизуйтесь через *'🔐 Авторизация'*",
+                                        parse_mode = "Markdown" )
         return
-    await update.message.reply_text( "📝 Введите @username канала для добавления:" )
+    await update.message.reply_text( "📝 Введите @username канала для добавления" )
 
 async def handle_unsubscribe( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> None:
     user_id = update.effective_user.id
     if user_id not in user_sessions:
-        await update.message.reply_text( "❌ Сначала авторизуйтесь через '🔐 Авторизация'" )
+        await update.message.reply_text( "❌ Сначала авторизуйтесь через *'🔐 Авторизация'*",
+                                        parse_mode = "Markdown" )
         return
-    await update.message.reply_text( "📝 Введите @username канала для отписки:" )
+    await update.message.reply_text( "📝 Введите @username канала для отписки" )
 
 async def handle_message( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> None:
     text = update.message.text
@@ -160,12 +162,13 @@ async def handle_message( update: Update, context: ContextTypes.DEFAULT_TYPE ) -
             elif update.message.reply_to_message and "отпис" in update.message.reply_to_message.text.lower():
                 await unsubscribe( update, context )
         else:
-            await update.message.reply_text( "❌ Сначала авторизуйтесь через '🔐 Авторизация'" )
+            await update.message.reply_text( "❌ Сначала авторизуйтесь через *'🔐 Авторизация'*",
+                                            parse_mode = "Markdown" )
 
 async def add_channel( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> None:
     user_id = update.effective_user.id
     if not context.args:
-        await update.message.reply_text( "Введите username канала (например, channel_name)" )
+        await update.message.reply_text( "📝 Введите username канала" )
         return
     
     channel_username = context.args[0]
@@ -174,7 +177,8 @@ async def add_channel( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> N
     
     if user_id not in monitored_channels[channel_username]:
         monitored_channels[channel_username].append(  user_id  )
-        await update.message.reply_text( f"✅ Теперь вы будете получать посты из @{ channel_username }!" )
+        await update.message.reply_text( f"✅ Теперь вы будете получать посты из @{ channel_username }!",
+                                        parse_mode = "Markdown" )
     else:
         await update.message.reply_text( "ℹ️ Вы уже подписаны на этот канал" )
 
@@ -186,7 +190,7 @@ async def my_channels( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> N
     ]
     
     if not user_channels:
-        await update.message.reply_text( "У вас нет активных подписок" )
+        await update.message.reply_text( "ℹ️ У вас нет активных подписок" )
     else:
         await update.message.reply_text(  
             "📢 Ваши каналы:\n" + "\n".join( user_channels )
@@ -195,13 +199,14 @@ async def my_channels( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> N
 async def unsubscribe( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> None:
     user_id = update.effective_user.id
     if not context.args:
-        await update.message.reply_text( "Введите username канала от которого хотите отписаться:" )
+        await update.message.reply_text( "📝 Введите username канала от которого хотите отписаться" )
         return
     
     channel_username = context.args[0]
     if channel_username in monitored_channels and user_id in monitored_channels[channel_username]:
         monitored_channels[channel_username].remove(  user_id  )
-        await update.message.reply_text( f"❌ Вы отписались от @{ channel_username }" )
+        await update.message.reply_text( f"❌ Вы отписались от *@{ channel_username }*",
+                                        parse_mode = "Markdown" )
     else:
         await update.message.reply_text( "ℹ️ Вы не подписаны на этот канал" )
 
@@ -230,14 +235,14 @@ async def start_telethon_client( user_id: int, session_string: str ):
                                 text = f"📢 Новый пост из @{ channel_username }:\n\n{ event.text }"
                              )
             except Exception as e:
-                logger.error( f"Ошибка: { e }" )
+                logger.error( f"Error: { e }" )
         
         await client.run_until_disconnected()
 
 
 # ===== Launch =====
-def main(  ):
-    application = Application.builder(  ).token(  BOT_TOKEN  ).build(  )
+def main():
+    application = Application.builder().token( BOT_TOKEN ).build()
     
     # Handlers
     application.add_handler( CommandHandler( "start", start ))
