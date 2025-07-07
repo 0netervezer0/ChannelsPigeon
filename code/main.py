@@ -12,8 +12,12 @@ from qrcode import QRCode
 configFile = open( 'config.txt' )
 cnf = configFile.read().split( '@' )
 BOT_TOKEN = str( cnf[0] )
-API_ID    = int( cnf[1] )    
+API_ID    = int( cnf[1] )
 API_HASH  = str( cnf[2] )
+
+# Timeout 
+PHONE_TIMEOUT = 120  # 2 min for phone number auth
+CODE_TIMEOUT = 300   # 5 min for qr auth
 
 
 # Key variables
@@ -26,7 +30,7 @@ logging.basicConfig(
     format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level  = logging.INFO
  )
-logger = logging.getLogger(  __name__  )
+logger = logging.getLogger( __name__ )
 
 
 # ===== Telegram Bot Handlers =====
@@ -126,6 +130,18 @@ async def handle_button( update: Update, context: ContextTypes.DEFAULT_TYPE ) ->
     text = update.message.text
     
     if text == "🔐 Авторизация":
+        keyboard = [
+            [KeyboardButton( "📱 По номеру телефона" )],
+            [KeyboardButton( "📷 Через QR-код" )]
+        ]
+        reply_markup = ReplyKeyboardMarkup( keyboard, resize_keyboard = True )
+        await update.message.reply_text(
+            "Выберите способ авторизации",
+            reply_markup = reply_markup
+        )
+    elif text == "📱 По номеру телефона":
+        await handle_phone_auth( update, context )
+    elif text == "📷 Через QR-код":
         await handle_auth_button( update, context )
     elif text == "➕ Добавить канал":
         await handle_add_channel( update, context )
@@ -162,8 +178,10 @@ async def handle_message( update: Update, context: ContextTypes.DEFAULT_TYPE ) -
             elif update.message.reply_to_message and "отпис" in update.message.reply_to_message.text.lower():
                 await unsubscribe( update, context )
         else:
-            await update.message.reply_text( "❌ Сначала авторизуйтесь через *'🔐 Авторизация'*",
-                                            parse_mode = "Markdown" )
+            await update.message.reply_text("❌ Сначала авторизуйтесь через *'🔐 Авторизация'*",
+                                        parse_mode="Markdown")
+    elif context.user_data.get( 'auth_step' ) in ['phone', 'code']:
+        await handle_phone_number( update, context )
 
 async def add_channel( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> None:
     user_id = update.effective_user.id
@@ -210,6 +228,62 @@ async def unsubscribe( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> N
     else:
         await update.message.reply_text( "ℹ️ Вы не подписаны на этот канал" )
 
+# Auth using phone number
+async def handle_phone_auth( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> None:
+    user = update.effective_user
+    if user is None:
+        return
+    user_id = user.id
+    if user_id in user_sessions:
+        await update.message.reply_text( "✅ Вы уже авторизованы." )
+        return
+
+    await update.message.reply_text(
+        "📱 Введите ваш номер телефона в формате +XXXXXXXXXXX (например, +79001234567)"
+    )
+    context.user_data['auth_step'] = 'phone'
+
+async def handle_phone_number( update: Update, context: ContextTypes.DEFAULT_TYPE ) -> None:
+    user_id = update.effective_user.id
+    text = update.message.text
+
+    if context.user_data.get( 'auth_step' ) == 'phone':
+        try:
+            client = TelegramClient( StringSession(), API_ID, API_HASH )
+            await client.connect()
+
+            # Запрашиваем код подтверждения
+            await client.send_code_request(text)
+            context.user_data['auth_step'] = 'code'
+            context.user_data['phone_number'] = text
+            context.user_data['client'] = client
+            await update.message.reply_text(
+                "🔑 Код подтверждения отправлен на ваш номер. Введите код в формате X-XXXX"
+            )
+        except Exception as e:
+            logger.exception( f"Error during phone auth: { e }" )
+            await update.message.reply_text( "❌ Произошла ошибка. Попробуйте снова." )
+    elif context.user_data.get( 'auth_step' ) == 'code':
+        try:
+            client = context.user_data['client']
+            phone_number = context.user_data['phone_number']
+            code = text.replace( '-', '' )  # Removing spaces and dash if it entered
+
+            # Auth with code
+            await client.sign_in( phone_number, code )
+            session_string = client.session.save()
+            user_sessions[user_id] = session_string
+            await update.message.reply_text( "✅ Авторизация прошла успешно!" )
+            asyncio.create_task(start_telethon_client( user_id, session_string ))
+        except Exception as e:
+            logger.exception( f"Error during code verification: { e }" )
+            await update.message.reply_text( "❌ Неверный код. Попробуйте снова." )
+        finally:
+            context.user_data.clear()
+            if 'client' in context.user_data:
+                await context.user_data['client'].disconnect()
+    else:
+        await update.message.reply_text( "❌ Неизвестная команда." )
 
 # ===== Telethon Monitor =====
 async def start_telethon_client( user_id: int, session_string: str ):
